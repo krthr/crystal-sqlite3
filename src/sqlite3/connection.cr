@@ -143,6 +143,40 @@ class SQLite3::Connection < DB::Connection
     end
   end
 
+  # Loads a trusted SQLite extension from *path*, optionally using *entry_point*.
+  # Enables only the native loader and disables it again, even if loading fails.
+  # Requires a linked SQLite library with extension loading support.
+  def load_extension(path : String, entry_point : String? = nil) : Nil
+    raise Exception.new("Connection is closed", LibSQLite3::Code::MISUSE.value) if closed?
+
+    path.check_no_null_byte("path")
+    entry_point.try(&.check_no_null_byte("entry_point"))
+
+    code = LibSQLite3.db_config(self, LibSQLite3::DBCONFIG_ENABLE_LOAD_EXTENSION, 1, Pointer(Int32).null)
+    unless code == 0
+      raise Exception.new("Failed to enable extension loading: SQLite error #{code}", code)
+    end
+
+    error_message = Pointer(UInt8).null
+    original_error = nil
+    begin
+      code = LibSQLite3.load_extension(self, path, entry_point, pointerof(error_message))
+      unless code == 0
+        message = error_message.null? ? "SQLite error #{code}" : String.new(error_message)
+        raise Exception.new("Failed to load extension: #{message}", code)
+      end
+    rescue error
+      original_error = error
+      raise error
+    ensure
+      LibSQLite3.free(error_message)
+      code = LibSQLite3.db_config(self, LibSQLite3::DBCONFIG_ENABLE_LOAD_EXTENSION, 0, Pointer(Int32).null)
+      unless code == 0
+        raise Exception.new("Failed to disable extension loading: SQLite error #{code}", code, original_error)
+      end
+    end
+  end
+
   def to_unsafe
     @db
   end
