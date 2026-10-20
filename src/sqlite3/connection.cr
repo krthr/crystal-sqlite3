@@ -158,23 +158,21 @@ class SQLite3::Connection < DB::Connection
     end
 
     error_message = Pointer(UInt8).null
-    original_error = nil
     begin
       code = LibSQLite3.load_extension(self, path, entry_point, pointerof(error_message))
       unless code == 0
         message = error_message.null? ? "SQLite error #{code}" : String.new(error_message)
-        raise Exception.new("Failed to load extension: #{message}", code)
       end
-    rescue error
-      original_error = error
-      raise error
     ensure
       LibSQLite3.free(error_message)
-      code = LibSQLite3.db_config(self, LibSQLite3::DBCONFIG_ENABLE_LOAD_EXTENSION, 0, Pointer(Int32).null)
-      unless code == 0
-        raise Exception.new("Failed to disable extension loading: SQLite error #{code}", code, original_error)
-      end
+      disable_code = LibSQLite3.db_config(self, LibSQLite3::DBCONFIG_ENABLE_LOAD_EXTENSION, 0, Pointer(Int32).null)
     end
+
+    load_error = Exception.new("Failed to load extension: #{message}", code) unless code == 0
+    unless disable_code == 0
+      raise Exception.new("Failed to disable extension loading: SQLite error #{disable_code}", disable_code, load_error)
+    end
+    raise load_error if load_error
   end
 
   def to_unsafe
